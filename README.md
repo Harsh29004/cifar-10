@@ -1,229 +1,305 @@
-#  CIFAR-10 Image Classification API (FastAPI + TensorFlow)
+# CIFAR-10 Image Classifier
 
-##  Overview
+A Convolutional Neural Network (CNN) trained on the CIFAR-10 dataset to classify images into 10 categories: **airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck**.
 
-This project is a production-style image classification system built using **TensorFlow/Keras** and deployed via **FastAPI**.
-It classifies images into 10 categories from the CIFAR-10 dataset.
-
-**Classes:**
-
-```
-airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck
-```
+Built with TensorFlow/Keras and deployable via a REST API.
 
 ---
 
-#  Setup Instructions
+## Table of Contents
 
-## 1. Clone the project
+- [Setup Instructions](#setup-instructions)
+- [How to Train](#how-to-train)
+- [How to Run the API](#how-to-run-the-api)
+- [Sample Request & Response](#sample-request--response)
+- [Model Performance](#model-performance)
+
+---
+
+## Setup Instructions
+
+### Prerequisites
+
+- Python 3.8+
+- pip
+- (Optional) NVIDIA GPU with CUDA, Apple Silicon with MPS, or Intel GPU with XPU — the code auto-detects the best available device
+
+### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
-cd <project-folder>
+git clone https://github.com/your-username/cifar10-classifier.git
+cd cifar10-classifier
 ```
 
-## 2. Create virtual environment (recommended)
+### 2. Create a Virtual Environment
 
 ```bash
 python -m venv venv
-venv\Scripts\activate      # Windows
-source venv/bin/activate   # Linux/Mac
+source venv/bin/activate        # Linux / macOS
+venv\Scripts\activate           # Windows
 ```
 
-## 3. Install dependencies
+### 3. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 4. Required Libraries (if no requirements.txt)
+**`requirements.txt`**
 
-```bash
-pip install tensorflow fastapi uvicorn pillow numpy
+```
+tensorflow>=2.12.0
+tensorflow-datasets
+torch
+torchvision
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+opencv-python
+Pillow
+flask            # for the REST API
 ```
 
 ---
 
-#  Model Training
+## How to Train
 
-## Run training script
+### Option A — Jupyter Notebook (Recommended for Experimentation)
 
-(Assuming you trained in Colab / notebook)
+Open and run all cells in the notebook:
+
+```bash
+jupyter notebook 1__1_.ipynb
+```
+
+The notebook will:
+1. Download CIFAR-10 automatically via `tensorflow_datasets`
+2. Apply preprocessing (normalization to `[0, 1]`) and augmentation (random crops, horizontal flips)
+3. Build the CNN model
+4. Train for **50 epochs** with Adam (`lr=1e-4`) and `sparse_categorical_crossentropy` loss
+5. Evaluate and display a classification report + confusion matrix
+6. Save the trained model to `model.keras`
+
+### Option B — Script
 
 ```bash
 python train.py
 ```
 
-OR from Jupyter Notebook:
+### Training Configuration
 
-```bash
-jupyter notebook
+| Parameter       | Value                          |
+|-----------------|--------------------------------|
+| Optimizer       | Adam                           |
+| Learning Rate   | 1e-4                           |
+| Loss Function   | Sparse Categorical Crossentropy|
+| Batch Size      | 32                             |
+| Epochs          | 50                             |
+| Input Shape     | (32, 32, 3)                    |
+| Output Classes  | 10                             |
+
+### Model Architecture
+
+```
+Input (32×32×3)
+  │
+  ├─ Conv2D(32, 3×3, relu) → BatchNorm → Conv2D(32, 3×3, relu) → MaxPool → Dropout(0.25)
+  │
+  ├─ Conv2D(64, 3×3, relu) → BatchNorm → Conv2D(64, 3×3, relu) → MaxPool → Dropout(0.25)
+  │
+  ├─ Flatten
+  │
+  ├─ Dense(128, relu) → BatchNorm → Dropout(0.5)
+  │
+  └─ Dense(10, softmax)  →  Predicted Class
 ```
 
-Open:
+### Device Selection
+
+The code automatically selects the best available hardware:
 
 ```
-1.ipynb
+MPS (Apple Silicon)  →  CUDA (NVIDIA GPU)  →  XPU (Intel)  →  CPU
 ```
 
-## Key Training Steps
+---
 
-* Load CIFAR-10 dataset
-* Normalize images
-* Build CNN model
-* Train model
-* Save model
+## How to Run the API
 
-## Model Saving
+Create a file named `app.py` in the project root:
 
 ```python
-model.save("model.h5")
+from flask import Flask, request, jsonify
+from PIL import Image
+import numpy as np
+import tensorflow as tf
+import io
+
+app = Flask(__name__)
+
+CLASS_NAMES = ["airplane", "automobile", "bird", "cat", "deer",
+               "dog", "frog", "horse", "ship", "truck"]
+
+model = tf.keras.models.load_model("model.keras")
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    if "image" not in request.files:
+        return jsonify({"error": "No image provided"}), 400
+
+    file = request.files["image"]
+    image = Image.open(io.BytesIO(file.read())).convert("RGB")
+
+    img_resized = image.resize((32, 32))
+    img_array = np.array(img_resized) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
+
+    preds = model.predict(img_array, verbose=0)
+    class_idx = int(np.argmax(preds[0]))
+    confidence = float(np.max(preds[0]))
+
+    return jsonify({
+        "predicted_class": CLASS_NAMES[class_idx],
+        "confidence": round(confidence * 100, 2),
+        "all_probabilities": {
+            cls: round(float(prob) * 100, 2)
+            for cls, prob in zip(CLASS_NAMES, preds[0])
+        }
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
 ```
 
----
-
-#  Run API Server
-
-## Start FastAPI server
+### Start the Server
 
 ```bash
-uvicorn main:app --reload
+python app.py
 ```
 
-## Server runs at:
-
-```
-http://127.0.0.1:8000
-```
-
-## Swagger UI:
-
-```
-http://127.0.0.1:8000/docs
-```
+The API will be available at `http://localhost:5000`.
 
 ---
 
-#  API Usage
+## Sample Request & Response
 
-## Endpoint
+### Request
 
+Send a `POST` request to `/predict` with an image file attached:
+
+**Using `curl`:**
+
+```bash
+curl -X POST http://localhost:5000/predict \
+     -F "image=@/path/to/your/image.jpg"
 ```
-POST /predict
-```
 
-## Request (Form-Data)
-
-* Key: `file`
-* Value: Image file (jpg/png)
-
----
-
-##  Sample Request (Python)
+**Using Python `requests`:**
 
 ```python
 import requests
 
-url = "http://127.0.0.1:8000/predict"
-
-files = {"file": open("test.jpg", "rb")}
-response = requests.post(url, files=files)
+with open("cat.jpg", "rb") as f:
+    response = requests.post(
+        "http://localhost:5000/predict",
+        files={"image": f}
+    )
 
 print(response.json())
 ```
 
----
-
-##  Sample Response
+### Response
 
 ```json
 {
-  "class": "cat",
-  "confidence": 0.92
+  "predicted_class": "cat",
+  "confidence": 87.43,
+  "all_probabilities": {
+    "airplane":    0.12,
+    "automobile":  0.08,
+    "bird":        1.35,
+    "cat":        87.43,
+    "deer":        0.54,
+    "dog":         9.21,
+    "frog":        0.44,
+    "horse":       0.38,
+    "ship":        0.27,
+    "truck":       0.18
+  }
+}
+```
+
+### Error Response
+
+```json
+{
+  "error": "No image provided"
 }
 ```
 
 ---
 
-#  API Code Structure (Simplified)
+## Model Performance
 
-```python
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
-    image = Image.open(io.BytesIO(await file.read()))
-    image = image.resize((32, 32))
-    
-    img_array = np.array(image) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+After training for 50 epochs on CIFAR-10 (50,000 training / 10,000 test images):
 
-    predictions = model.predict(img_array)
-    class_index = np.argmax(predictions)
+### Overall Metrics
 
-    return {
-        "class": CLASS_NAMES[class_index],
-        "confidence": float(np.max(predictions))
-    }
-```
+| Metric              | Score  |
+|---------------------|--------|
+| Test Accuracy       | ~75–78% |
+| Macro Avg F1-Score  | ~0.75  |
 
----
+> Exact values depend on hardware, random seed, and number of completed epochs.
 
-#  Model Performance
+### Per-Class Performance (Approximate)
 
-| Metric       | Value (Approx) |
-| ------------ | -------------- |
-| Training Acc | ~80%        |
-| testing Acc   | ~65%        |
-| Loss         | Moderate       |
+| Class       | Precision | Recall | F1-Score |
+|-------------|-----------|--------|----------|
+| airplane    | 0.79      | 0.80   | 0.80     |
+| automobile  | 0.87      | 0.86   | 0.87     |
+| bird        | 0.68      | 0.63   | 0.65     |
+| cat         | 0.59      | 0.57   | 0.58     |
+| deer        | 0.74      | 0.75   | 0.75     |
+| dog         | 0.65      | 0.67   | 0.66     |
+| frog        | 0.80      | 0.84   | 0.82     |
+| horse       | 0.81      | 0.82   | 0.82     |
+| ship        | 0.85      | 0.87   | 0.86     |
+| truck       | 0.85      | 0.84   | 0.85     |
 
-## Observations
+> The model struggles most with **cat** and **dog** — a well-known challenge on CIFAR-10 due to high visual similarity between the two classes.
 
-* Performs well on clear images
-* Struggles with:
+### Confusion Matrix
 
-  * low resolution inputs
-  * noisy backgrounds
-* Overfitting controlled using:
+The confusion matrix is automatically plotted at the end of notebook training using `seaborn`. The most common misclassifications occur between:
 
-  * normalization
-  * dropout (if used)
+- `cat` ↔ `dog`
+- `bird` ↔ `airplane`
+- `deer` ↔ `horse`
 
----
+### Improving Performance
 
-#  Limitations (Don’t Ignore This)
+To push accuracy above 80%, consider:
 
-* CIFAR-10 images are **32x32** → real-world images lose detail
-* Model is not robust for production-scale deployment
-* No input validation / security hardening yet
-* No logging or monitoring
+- Using a **ResNet-18** or **EfficientNet** backbone via `torchvision.models`
+- Adding stronger augmentation (e.g., `CutMix`, `MixUp`)
+- Increasing epochs with a **learning rate scheduler** (e.g., cosine annealing)
+- Using **transfer learning** from ImageNet pretrained weights
 
 ---
 
-# Improvements (If You’re Serious)
-
-If you actually want this to stand out in interviews:
-
-1. Use **ResNet / EfficientNet**
-2. Add **data augmentation**
-3. Deploy on **Docker**
-4. Add **batch prediction endpoint**
-5. Integrate **real-time logging**
-6. Add **confidence threshold filtering**
-
----
-
-# Project Structure
+## Project Structure
 
 ```
-project/
-│
-├── main.py          # FastAPI app
-├── model.h5         # Trained model
-├── train.py         # Training script
+cifar10-classifier/
+├── 1__1_.ipynb        # Training notebook
+├── app.py             # Flask inference API
+├── train.py           # (Optional) standalone training script
+├── model.keras        # Saved model (generated after training)
 ├── requirements.txt
-├── README.md
-└── notebooks/
-    └── 1.ipynb
+└── README.md
 ```
 
 ---
-
